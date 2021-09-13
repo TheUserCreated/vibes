@@ -6,6 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serenity = "0.10.9"
-tokio = "1.11.0"
+serenity = {version = "0.10.9", features = ["unstable_discord_api"]}
+tokio = {version = "1.11.0", features = ["rt-multi-thread"]}
 dotenv = "0.15.0"
