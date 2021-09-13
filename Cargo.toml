@@ -9,3 +9,4 @@ edition = "2021"
 serenity = {version = "0.10.9", features = ["unstable_discord_api"]}
 tokio = {version = "1.11.0", features = ["rt-multi-thread"]}
 dotenv = "0.15.0"
+songbird = "0.2.0"

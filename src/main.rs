@@ -5,20 +5,15 @@ use std::{
 };
 
 use dotenv;
+use serenity::prelude::*;
 use serenity::{
     async_trait,
     client::bridge::gateway::{GatewayIntents, ShardId, ShardManager},
     framework::standard::{
-        Args,
         buckets::{LimitedFor, RevertBucket},
-        CommandGroup,
-        CommandOptions,
-        CommandResult,
-        DispatchError,
         help_commands,
-        HelpOptions,
         macros::{check, command, group, help, hook},
-        Reason,
+        Args, CommandGroup, CommandOptions, CommandResult, DispatchError, HelpOptions, Reason,
         StandardFramework,
     },
     http::Http,
@@ -28,21 +23,21 @@ use serenity::{
         id::UserId,
         interactions::{
             application_command::{
-                ApplicationCommand,
-                ApplicationCommandInteractionDataOptionValue,
+                ApplicationCommand, ApplicationCommandInteractionDataOptionValue,
                 ApplicationCommandOptionType,
             },
-            Interaction,
-            InteractionResponseType,
+            Interaction, InteractionResponseType,
         },
         permissions::Permissions,
         prelude::*,
     },
     utils::{content_safe, ContentSafeOptions},
 };
-use serenity::prelude::*;
+use songbird::{
+    input::{self, restartable::Restartable},
+    Event, EventContext, EventHandler as VoiceEventHandler, SerenityInit, TrackEvent,
+};
 use tokio::sync::Mutex;
-
 
 //Structures needed
 //TODO: organize into a different file?
@@ -64,32 +59,49 @@ struct Handler;
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
-        let commands = ApplicationCommand::set_global_application_commands(&ctx.http, | commands | {
-            commands.create_application_command(|command| {
-                command.name("ping").description("pong")
-
-                }).create_application_command(|command|{
-                command.name("id").description("Get a user id").create_option(|option| {
-                    option
+        let commands = ApplicationCommand::set_global_application_commands(&ctx.http, |commands| {
+            commands
+                .create_application_command(|command| command.name("ping").description("pong"))
+                .create_application_command(|command| {
+                    command
                         .name("id")
-                        .description("The user to lookup")
-                        .kind(ApplicationCommandOptionType::User)
-                        .required(true)
+                        .description("Get a user id")
+                        .create_option(|option| {
+                            option
+                                .name("id")
+                                .description("The user to lookup")
+                                .kind(ApplicationCommandOptionType::User)
+                                .required(true)
+                        })
                 })
+                .create_application_command(|command| {
+                    command.name("join").description("Joins a Voice Channel.")
+                })
+        })
+        .await;
+
+        let guild_commands = GuildId(705038806893592657)
+            .create_application_command(&ctx.http, |command| {
+                command.name("test").description("for testing only")
             })
-        }).await;
-
-        let guild_commands = GuildId(705038806893592657).create_application_command(&ctx.http, |command| {
-            command.name("test").description("for testing only")
-        }).await;
-        println!("I now have the following global slash commands: {:#?}", commands);
-
+            .await;
+        println!(
+            "I now have the following global slash commands: {:#?}",
+            commands
+        );
     }
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         if let Interaction::ApplicationCommand(command) = interaction {
             let content = match command.data.name.as_str() {
                 "ping" => "Hey, I'm alive!".to_string(),
                 "test" => "Test successful".to_string(),
+                "join" => {
+                    let executor = interaction
+                        .application_command()
+                        .unwrap()
+                        .member
+                        .expect("cannot be run outside of a guild!");
+                }
                 "id" => {
                     let options = command
                         .data
@@ -100,10 +112,8 @@ impl EventHandler for Handler {
                         .as_ref()
                         .expect("Expected user object");
 
-
-
                     if let ApplicationCommandInteractionDataOptionValue::User(user, _member) =
-                    options
+                        options
                     {
                         format!("{}'s id is {}", user.tag(), user.id)
                     } else {
@@ -127,10 +137,6 @@ impl EventHandler for Handler {
     }
 }
 
-
-
-
-
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().expect("Failed to load env file. Do you have one?");
@@ -153,11 +159,16 @@ async fn main() {
         Err(why) => panic!("Could not access application info: {:?}", why),
     };
 
-    let application_id: u64 = env::var("APPLICATION_ID").expect("Need APPLICATION_ID in env").parse().expect("invalid APPLICATION_ID");
-    let framework = StandardFramework::new()
-        .configure(|c| c.with_whitespace(true).on_mention(Some(bot_id))
+    let application_id: u64 = env::var("APPLICATION_ID")
+        .expect("Need APPLICATION_ID in env")
+        .parse()
+        .expect("invalid APPLICATION_ID");
+    let framework = StandardFramework::new().configure(|c| {
+        c.with_whitespace(true)
+            .on_mention(Some(bot_id))
             .prefix("~")
-            .owners(owners));
+            .owners(owners)
+    });
     //.help(&MY_HELP)
     //    .group(&GENERAL_GROUP))
 
@@ -165,7 +176,9 @@ async fn main() {
         .event_handler(Handler)
         .framework(framework)
         .application_id(application_id)
-        .intents(GatewayIntents::all()).await.expect("Error creating client");
+        .intents(GatewayIntents::GUILD_VOICE_STATES())
+        .await
+        .expect("Error creating client");
     {
         let mut data = client.data.write().await;
         data.insert::<CommandCounter>(HashMap::default());
