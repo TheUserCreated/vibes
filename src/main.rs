@@ -126,7 +126,8 @@ impl EventHandler for Handler {
                 "test" => "Test successful".to_string(),
                 "join" => {
                     let executor = command.member.as_ref().expect("Cant be run outside guilds");
-                    let guild = ctx.cache.guild(executor.guild_id).await.expect("failed");
+                    let guild = command.guild_id.expect("need a guild id");
+                    //TODO acquire guild object here, its the current blocker
                     let channel_id = guild
                         .voice_states
                         .get(&executor.user.id)
@@ -138,6 +139,7 @@ impl EventHandler for Handler {
                         .clone();
                     let (handle_lock, success) = manager.join(guild.id, connect_to).await;
                     let chan_id = command.channel_id;
+                    println!("{}", channel_id.expect("bruh").0);
                     let send_http = ctx.http.clone();
                     let mut handle = handle_lock.lock().await;
                     handle.add_global_event(
@@ -234,7 +236,11 @@ async fn main() {
         .framework(framework)
         .register_songbird()
         .application_id(application_id)
-        .intents((GatewayIntents::GUILD_VOICE_STATES | GatewayIntents::GUILD_MEMBERS))
+        .intents(
+            (GatewayIntents::GUILD_VOICE_STATES
+                | GatewayIntents::GUILD_MEMBERS
+                | GatewayIntents::GUILD_PRESENCES),
+        )
         .await
         .expect("Error creating client");
     {
