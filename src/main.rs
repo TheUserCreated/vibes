@@ -6,6 +6,7 @@ use std::{
 
 use dotenv;
 use serenity::prelude::*;
+use serenity::static_assertions::_core::sync::atomic::{AtomicUsize, Ordering};
 use serenity::{
     async_trait,
     client::bridge::gateway::{GatewayIntents, ShardId, ShardManager},
@@ -38,6 +39,7 @@ use songbird::{
     Event, EventContext, EventHandler as VoiceEventHandler, SerenityInit, TrackEvent,
 };
 use tokio::sync::Mutex;
+use tokio::time::Duration;
 
 //Structures needed
 //TODO: organize into a different file?
@@ -45,6 +47,33 @@ struct ShardManagerContainer;
 
 impl TypeMapKey for ShardManagerContainer {
     type Value = Arc<Mutex<ShardManager>>;
+}
+
+struct TrackEndNotifier {
+    chan_id: ChannelId,
+    http: Arc<Http>,
+}
+#[async_trait]
+impl VoiceEventHandler for TrackEndNotifier {
+    async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
+        if let EventContext::Track(track_list) = ctx {}
+
+        None
+    }
+}
+#[async_trait]
+impl VoiceEventHandler for ChannelDurationNotifier {
+    async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
+        let count_before = self.count.fetch_add(1, Ordering::Relaxed);
+
+        None
+    }
+}
+
+struct ChannelDurationNotifier {
+    chan_id: ChannelId,
+    count: Arc<AtomicUsize>,
+    http: Arc<Http>,
 }
 
 struct CommandCounter;
@@ -96,11 +125,39 @@ impl EventHandler for Handler {
                 "ping" => "Hey, I'm alive!".to_string(),
                 "test" => "Test successful".to_string(),
                 "join" => {
-                    let executor = interaction
-                        .application_command()
-                        .unwrap()
-                        .member
-                        .expect("cannot be run outside of a guild!");
+                    let executor = command.member.expect("Cant be run outside guilds");
+                    let guild = ctx.cache.guild(executor.guild_id).await.expect("failed");
+                    let channel_id = guild
+                        .voice_states
+                        .get(&executor.user.id)
+                        .and_then(|voice_state| voice_state.channel_id);
+                    let connect_to = channel_id.expect("cant connect");
+                    let manager = songbird::get(&ctx)
+                        .await
+                        .expect("songbird failed at init")
+                        .clone();
+                    let (handle_lock, success) = manager.join(guild.id, connect_to).await;
+                    let chan_id = command.channel_id;
+                    let send_http = ctx.http.clone();
+                    let mut handle = handle_lock.lock().await;
+                    handle.add_global_event(
+                        Event::Track(TrackEvent::End),
+                        TrackEndNotifier {
+                            chan_id,
+                            http: send_http,
+                        },
+                    );
+
+                    let send_http = ctx.http.clone();
+                    handle.add_global_event(
+                        Event::Periodic(Duration::from_secs(60), None),
+                        ChannelDurationNotifier {
+                            chan_id,
+                            count: Default::default(),
+                            http: send_http,
+                        },
+                    );
+                    "tried to join".to_string()
                 }
                 "id" => {
                     let options = command
@@ -123,7 +180,7 @@ impl EventHandler for Handler {
                 _ => "not implemented :(".to_string(),
             };
 
-            if let Err(why) = command
+            /*if let Err(why) = command
                 .create_interaction_response(&ctx.http, |response| {
                     response
                         .kind(InteractionResponseType::ChannelMessageWithSource)
@@ -132,7 +189,7 @@ impl EventHandler for Handler {
                 .await
             {
                 println!("Cannot respond to slash command: {}", why);
-            }
+            }*/
         }
     }
 }
@@ -175,8 +232,9 @@ async fn main() {
     let mut client = Client::builder(&token)
         .event_handler(Handler)
         .framework(framework)
+        .register_songbird()
         .application_id(application_id)
-        .intents(GatewayIntents::GUILD_VOICE_STATES())
+        .intents((GatewayIntents::GUILD_VOICE_STATES | GatewayIntents::GUILD_MEMBERS))
         .await
         .expect("Error creating client");
     {
@@ -186,5 +244,10 @@ async fn main() {
     }
     if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
+    }
+}
+fn check_msg(result: CommandResult<Message>) {
+    if let Err(why) = result {
+        println!("Error sending message: {:?}", why);
     }
 }
