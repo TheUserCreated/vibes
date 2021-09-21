@@ -125,7 +125,7 @@ impl EventHandler for Handler {
                 "ping" => "Hey, I'm alive!".to_string(),
                 "test" => "Test successful".to_string(),
                 "join" => {
-                    let executor = command.member.expect("Cant be run outside guilds");
+                    let executor = command.member.as_ref().expect("Cant be run outside guilds");
                     let guild = ctx.cache.guild(executor.guild_id).await.expect("failed");
                     let channel_id = guild
                         .voice_states
@@ -180,7 +180,7 @@ impl EventHandler for Handler {
                 _ => "not implemented :(".to_string(),
             };
 
-            /*if let Err(why) = command
+            if let Err(why) = command
                 .create_interaction_response(&ctx.http, |response| {
                     response
                         .kind(InteractionResponseType::ChannelMessageWithSource)
@@ -189,7 +189,7 @@ impl EventHandler for Handler {
                 .await
             {
                 println!("Cannot respond to slash command: {}", why);
-            }*/
+            }
         }
     }
 }
